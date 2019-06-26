@@ -1,0 +1,102 @@
+---
+title: "Competición sobre la plataforma Kaggle de la asignatura Minería de datos: Preprocesamiento y clasificación. Árboles de decisión"
+author: "Carlos Manuel Sequí Sánchez"
+date: "23 de febrero de 2019"
+output: pdf_document
+---
+
+```{r}
+library(mice)
+library(RWeka)
+library(rpart)
+library(caret)
+library(Amelia)
+library(mRMRe)
+library(FSelector)
+library(NoiseFiltersR)
+
+set.seed(3)
+```
+
+
+leemos los datos de entrada:
+```{r}
+testClassAttribute = read.csv("./sampleSubmission.csv")
+train = read.csv("./train.csv", na.strings = "?")
+test = read.csv("./test.csv")
+```
+
+Primeramente entrenamos con los datos de train para más tarde validar con los de test, por tanto procedemos ahora a realizar el preprocesamiento con el conjunto de train.
+```{r}
+# Nos fijamos antes de nada en comprobar si los datos estan balanceados
+dim(train)
+names(train)
+train$C = as.factor(train$C)
+
+# ¿Están los datos balanceados?
+table(train$C)
+```
+Como vemos existen el doble de instancias con valor de clase 0 que instancias con valor de clase 1, estamos ante un problema desbalanceado.
+
+
+```{r}
+# comprobamos la existencia de instancias duplicadas
+train[duplicated(train),]
+dim(train[duplicated(train),])
+```
+
+Como podemos observar, existen 26 instancias que tienen como valor en todos sus atributos el -68931.0000, procedo a eliminarlas ya que parece ser ruido.
+```{r}
+train = train[!duplicated(train),]
+# reasignamos los indices de las filas
+rownames(train) = c(1:nrow(train))
+```
+
+
+Tras esto, vamos a comprobar si existen valores perdidos
+```{r}
+# por atributos
+apply(is.na(train),2,function(attribute){sum(attribute==TRUE)})
+# por instancias
+naByRow = apply(is.na(train),1,function(attribute){sum(attribute==TRUE)})
+# veamos si hay alguna fila donde haya mas de un na
+any(naByRow > 1)
+
+```
+
+Para la imputación de valores voy a utilizar la librería Amelia con el método predictive mean matching para valores númericos en los atributos.
+```{r}
+newdata=amelia(train[,-51])
+imputacion1 = cbind(newdata$imputations$imp5,C=train[,51])
+```
+
+Eliminamos ruido del dataset
+```{r}
+out = EF(C~.,imputacion1,consensus=FALSE)
+imputacion1 = out$cleanData
+```
+
+
+Procedemos a utilizar el algoritmo de predicción
+```{r}
+# entrenamos el modelo
+fitNuevo = LMT(C~.,data=imputacion1)
+cvResult = evaluate_Weka_classifier(fitNuevo,numFolds = 10,seed = 10)
+
+# predecimos con el modelo usado
+probabilidades = as.data.frame(predict(fitNuevo,test,type = "prob"))
+predicciones = as.data.frame(apply(probabilidades,1,function(item){ifelse(item[1]>0.5,0,1)}) )
+
+# convertimos las predicciones al formato de salida
+names(predicciones)[1] = "Prediction"
+salida = cbind(Id=c(1:dim(predicciones)[1]),predicciones)
+write.csv(x=salida,file="salida.csv",quote = FALSE,row.names = FALSE)
+print(cvResult)
+```
+
+
+
+
+
+
+
